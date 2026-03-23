@@ -129,7 +129,6 @@ static void mat4_multiply(float *out, const float *a, const float *b);
     desc.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
     desc.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
     desc.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-    desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
     _pipeline = [device newRenderPipelineStateWithDescriptor:desc error:&error];
 
@@ -202,8 +201,6 @@ static void mat4_multiply(float *out, const float *a, const float *b);
     /* Render */
     MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
     if (!rpd) return;
-    rpd.colorAttachments[0].clearColor = MTLClearColorMake(0.05, 0.05, 0.08, 1.0);
-    rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:rpd];
@@ -230,7 +227,8 @@ static void mat4_multiply(float *out, const float *a, const float *b);
 @end
 
 @implementation MDVizAppDelegate {
-    NSWindow *_window;
+    NSWindow       *_window;
+    MDVizRenderer  *_renderer;  /* strong ref — MTKView delegate is weak */
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -252,13 +250,13 @@ static void mat4_multiply(float *out, const float *a, const float *b);
 
     MTKView *mtkView = [[MTKView alloc] initWithFrame:frame device:device];
     mtkView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
-    mtkView.depthStencilPixelFormat = MTLPixelFormatDepth32Float;
+    mtkView.clearColor = MTLClearColorMake(0.05, 0.05, 0.08, 1.0);
     mtkView.preferredFramesPerSecond = 60;
 
-    MDVizRenderer *renderer = [[MDVizRenderer alloc] initWithDevice:device
-                                                                sys:_sys
-                                                              force:_force_func];
-    mtkView.delegate = renderer;
+    _renderer = [[MDVizRenderer alloc] initWithDevice:device
+                                                 sys:_sys
+                                               force:_force_func];
+    mtkView.delegate = _renderer;
     _window.contentView = mtkView;
 
     [_window makeKeyAndOrderFront:nil];
@@ -329,41 +327,29 @@ static void mat4_perspective(float *m, float fovy, float aspect, float near, flo
 
 static void mat4_look_at(float *m, float ex, float ey, float ez,
                           float cx, float cy, float cz) {
+    /* Forward = normalize(center - eye) */
     float fx = cx - ex, fy = cy - ey, fz = cz - ez;
     float len = sqrtf(fx*fx + fy*fy + fz*fz);
     fx /= len; fy /= len; fz /= len;
 
-    /* up = (0, 1, 0) */
-    float sx = fy * 0.0f - fz * 1.0f;  /* cross(f, up) — simplified since up=(0,1,0) */
-    float sy = fz * 0.0f - fx * 0.0f;
-    float sz = fx * 1.0f - fy * 0.0f;
-    /* Oops, let me do this properly */
-    sx =  fy * 0.0f - fz * 0.0f;  /* This is wrong. Let me use the standard formula */
+    /* Right = normalize(forward × up), up = (0,1,0) */
+    /* cross(f, up) = (fy*0 - fz*1, fz*0 - fx*0, fx*1 - fy*0) */
+    float sx = -fz, sy = 0.0f, sz = fx;
+    len = sqrtf(sx*sx + sy*sy + sz*sz);
+    if (len > 1e-6f) { sx /= len; sy /= len; sz /= len; }
 
-    /* cross(forward, up) where up = (0,1,0) */
-    sx = -fz;  /* fy*0 - fz*1... no */
-    /* f cross up = (fy*0 - fz*1, fz*0 - fx*0, fx*1 - fy*0) = (-fz, 0, fx)... no */
-    /* Actually: cross(f, (0,1,0)) = (fz, 0, -fx) ... let me just compute properly */
-    /* s = normalize(cross(f, up)) */
-    sx = fz;  /* fy*0 - fz*0 ... I keep messing this up. Standard cross product: */
-    /* a×b = (ay*bz - az*by, az*bx - ax*bz, ax*by - ay*bx) */
-    /* f×up = (fy*0 - fz*1, fz*0 - fx*0, fx*1 - fy*0) = (-fz, 0, fx) */
-    sx = -fz; sy = 0.0f; sz = fx;
-    len = sqrtf(sx*sx + sz*sz);
-    if (len > 1e-6f) { sx /= len; sz /= len; }
-
-    /* u = cross(s, f) */
+    /* Up = normalize(right × forward) */
     float ux = sy*fz - sz*fy;
     float uy = sz*fx - sx*fz;
     float uz = sx*fy - sy*fx;
 
-    memset(m, 0, 16 * sizeof(float));
-    m[0] = sx;  m[4] = sy;  m[8]  = sz;
-    m[1] = ux;  m[5] = uy;  m[9]  = uz;
-    m[2] = -fx; m[6] = -fy; m[10] = -fz;
+    /* Column-major view matrix */
+    m[0]  =  sx; m[1]  =  ux; m[2]  = -fx; m[3]  = 0.0f;
+    m[4]  =  sy; m[5]  =  uy; m[6]  = -fy; m[7]  = 0.0f;
+    m[8]  =  sz; m[9]  =  uz; m[10] = -fz; m[11] = 0.0f;
     m[12] = -(sx*ex + sy*ey + sz*ez);
     m[13] = -(ux*ex + uy*ey + uz*ez);
-    m[14] = -(-fx*ex + -fy*ey + -fz*ez);
+    m[14] =  (fx*ex + fy*ey + fz*ez);
     m[15] = 1.0f;
 }
 
