@@ -19,9 +19,13 @@ Metal host is Objective-C (`-fobjc-arc`), compiled separately from C sources.
 
 - `include/md_types.h` — MDSystem struct, LJ constants, ForceFunc typedef
 - `include/md_force.h` — all force kernel declarations
+- `include/md_celllist.h` — cell list acceleration structure
 - `src/md_force_*.c` — one file per kernel implementation
-- `src/md_force_metal.metal` — Metal compute shader (MSL)
-- `src/md_force_metal_host.m` — Objective-C Metal bridge
+- `src/md_celllist.c` — cell list build/create/destroy
+- `src/md_force_metal.metal` — Metal compute shader (MSL), all-pairs tiled
+- `src/md_force_metal_cl.metal` — Metal cell list shader
+- `src/md_force_metal_host.m` — Objective-C Metal bridge (all-pairs)
+- `src/md_force_metal_cl_host.m` — Objective-C Metal bridge (cell list)
 - `src/main.c` — simulation loop, CLI parsing, timing, GFLOPS reporting
 
 ## Adding a new kernel
@@ -44,11 +48,12 @@ Metal host is Objective-C (`-fobjc-arc`), compiled separately from C sources.
 
 - NEON: ~29 GFLOPS (single core, compute-bound)
 - OpenMP: ~112 GFLOPS (4 P-cores)
-- Metal: ~810 GFLOPS (10 GPU cores, ALU-bound on LJ chain)
+- Metal all-pairs: ~810 GFLOPS (10 GPU cores, ALU-bound on LJ chain)
+- Metal+CellList: ~128 GFLOPS stencil, 4.3ms/step at 70K (memory-bound, scattered access)
+- OMP+CellList: ~34 GFLOPS, 15.7ms/step at 87K
 - SME2: ~5.5 GFLOPS (wrong problem shape — designed for FMOPA)
 
 ## Next steps
 
-- Tabulated potential (texture lookup) to break the GPU ALU bottleneck
-- Neighbor lists for O(N) scaling
+- Cluster-pair neighbor lists (GROMACS NBNXM style) for GPU SIMD coherence
 - GCP cross-architecture benchmarking (Axion SVE2, Sapphire Rapids AVX-512, H100 CUDA)
