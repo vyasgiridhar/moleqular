@@ -133,6 +133,7 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 | **Metal tiled all-pairs** | 810 GFLOPS | Shared memory tiles amortize j-particle loads across 128 threads |
 | **Cell lists** (CPU) | 340× speedup at 87K (NEON→OMP+CL) | O(N) vs O(N²). Only ~52 neighbors within cutoff at density 0.8 |
 | **Cell lists** (GPU) | 45× speedup at 70K | Same O(N) win; sorted particles give decent L2 behavior |
+| **CUDA on NVIDIA L4** (all-pairs tiled) | 6,821 GFLOPS peak (22% of 30.3 TFLOPS) | Same tiled algorithm, 58 SMs vs M4's 10 GPU cores. 8.4× faster than Metal — almost exactly the TFLOPS ratio (7.1×). Both ALU-bound on the same serial dependency chain. |
 
 ### Misses
 
@@ -147,6 +148,21 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 | **Horner polynomial in cell list kernel** | Worse energy conservation, no speed gain | Force (Horner) and PE (analytical) computed from different functions → non-conservative forces → systematic energy drift. Speed unchanged because cell list kernel is memory-bound, not compute-bound. |
 | **ANE neural force kernel** | System explodes after ~50 steps | 3×64 SiLU MLP on Apple Neural Engine. Initial PE matches to 0.01% but MLP approximation error accumulates through Verlet integration → catastrophic energy drift. Fun stunt, not viable for MD. |
 | **GCP Axion (Neoverse V2) cross-arch** | 2-2.8× slower than M4 per core | 128-bit SVE2 = same width as NEON, no wider-than-NEON benefit. 10.4 vs 29 GFLOPS single-core — mostly clock (2.0 vs 3.2 GHz) but M4's wider OoO engine adds another 30%. Cloud ARM is for scale-out, not single-core perf. |
+
+### Cross-architecture GPU comparison (all-pairs tiled, ms/step)
+
+```
+N        M4 Metal     L4 CUDA      L4/M4
+         (10 cores)   (58 SMs)
+864      1.50         0.16         9.4×
+4,000    1.33         0.43         3.1×
+10,976   3.70         1.00         3.7×
+32,000   26.5         3.65         7.3×
+70,304   ~190         15.0         12.7×
+108,000  —            34.2         —
+```
+
+L4 peak: 6,821 GFLOPS (22% utilization). M4 peak: 810 GFLOPS (19%). Both hit the same ALU bottleneck — the L4 just has 5.8× more execution units.
 
 ### Key insight
 
