@@ -1,0 +1,7 @@
+*.o
+*.opt.yml
+moleqular
+trajectory.xyz
+*.profraw
+*.profdata
+.DS_Store
