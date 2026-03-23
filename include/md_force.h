@@ -27,4 +27,13 @@ void md_force_f64(MDSystem *sys, float *pe_out);
 /* Metal GPU compute — tiled all-pairs on M4 GPU cores */
 void md_force_metal(MDSystem *sys, float *pe_out);
 
+/* NEON + cell list neighbor list — O(N) scaling */
+void md_force_neon_cl(MDSystem *sys, float *pe_out);
+
+/* OpenMP + NEON + cell list — O(N) multi-core */
+void md_force_omp_cl(MDSystem *sys, float *pe_out);
+
+/* Metal GPU + cell list — O(N) on GPU */
+void md_force_metal_cl(MDSystem *sys, float *pe_out);
+
 #endif /* MD_FORCE_H */

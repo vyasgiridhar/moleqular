@@ -50,6 +50,15 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--metal") == 0) {
             compute_forces = md_force_metal;
             mode = "Metal GPU";
+        } else if (strcmp(argv[i], "--cl") == 0) {
+            compute_forces = md_force_neon_cl;
+            mode = "NEON+CellList";
+        } else if (strcmp(argv[i], "--omp-cl") == 0) {
+            compute_forces = md_force_omp_cl;
+            mode = "OMP+NEON+CellList";
+        } else if (strcmp(argv[i], "--metal-cl") == 0) {
+            compute_forces = md_force_metal_cl;
+            mode = "Metal+CellList";
         } else if (strncmp(argv[i], "--ncells=", 9) == 0) {
             ncells = atoi(argv[i] + 9);
         } else if (strncmp(argv[i], "--steps=", 8) == 0) {
@@ -120,8 +129,23 @@ int main(int argc, char **argv) {
      * NEON/SME2/OMP: N*N pairs (all-pairs, no N3L)
      */
     int uses_n3l = (compute_forces == md_force_scalar || compute_forces == md_force_neon_n3l);
+    int uses_cl  = (compute_forces == md_force_neon_cl || compute_forces == md_force_omp_cl
+                    || compute_forces == md_force_metal_cl);
     double n = (double)sys->n_real;
-    double pairs_per_eval = uses_n3l ? n*(n-1.0)/2.0 : n*n;
+    double pairs_per_eval;
+    if (uses_cl) {
+        /* Cell list: ~27 cells × particles_per_cell neighbors per particle */
+        double cs = (double)(int)(sys->lbox / MD_CUTOFF);
+        if (cs < 3.0) cs = 3.0;
+        double cvol = sys->lbox / cs;
+        cvol = cvol * cvol * cvol;
+        double per_cell = (double)MD_DENSITY * cvol;
+        pairs_per_eval = n * 27.0 * per_cell;
+    } else if (uses_n3l) {
+        pairs_per_eval = n*(n-1.0)/2.0;
+    } else {
+        pairs_per_eval = n*n;
+    }
     double flops_per_eval = pairs_per_eval * 20.0;
     double flops_total    = flops_per_eval * (double)nsteps;
     double gflops         = flops_total / elapsed / 1e9;
