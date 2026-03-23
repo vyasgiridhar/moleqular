@@ -35,19 +35,41 @@ METAL_HOST_SRC    = src/md_force_metal_host.m
 METAL_HOST_OBJ    = src/md_force_metal_host.o
 METAL_CL_HOST_SRC = src/md_force_metal_cl_host.m
 METAL_CL_HOST_OBJ = src/md_force_metal_cl_host.o
+ANE_HOST_SRC      = src/md_force_ane_host.m
+ANE_HOST_OBJ      = src/md_force_ane_host.o
 METAL_SHADER      = src/md_force_metal.metal
 METAL_AIR         = src/md_force_metal.air
 METAL_LIB         = md_force.metallib
 
+# Visualization sources
+VIZ_SRC = src/md_viz.m
+VIZ_OBJ = src/md_viz.o
+VIZ_BIN = moleqular-viz
+
+# Shared objects (everything except main.o for the viz binary)
+SHARED_SRC = src/md_system.c src/md_force_scalar.c src/md_force_neon.c \
+             src/md_force_omp.c src/md_force_tiled.c src/md_force_sme2.c \
+             src/md_force_neon_n3l.c src/md_force_f64.c \
+             src/md_celllist.c src/md_force_neon_cl.c src/md_force_omp_cl.c \
+             src/md_integrate.c src/md_io.c
+SHARED_OBJ = $(SHARED_SRC:.c=.o)
+
 BIN     = moleqular
 
-.PHONY: all clean run bench metallib
+.PHONY: all clean run bench metallib viz
 
 all: $(BIN)
 
-# Link: C objects + Objective-C Metal host objects
-$(BIN): $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ)
+viz: $(VIZ_BIN)
+
+# Link: C objects + Objective-C host objects
+$(BIN): $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(ANE_HOST_OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -framework CoreML -o $@ $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(ANE_HOST_OBJ)
+
+# Visualization binary (separate executable with its own main)
+$(VIZ_BIN): $(SHARED_OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(ANE_HOST_OBJ) $(VIZ_OBJ)
+	$(CC) $(CFLAGS) $(LDFLAGS) -framework CoreML -framework MetalKit -framework AppKit \
+		-o $@ $(SHARED_OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(ANE_HOST_OBJ) $(VIZ_OBJ)
 
 # --- Metal shader precompilation (optional, requires full Xcode) ---
 # If you have Xcode installed, `make metallib` creates a precompiled .metallib
@@ -75,6 +97,12 @@ $(METAL_HOST_OBJ): $(METAL_HOST_SRC) include/md_types.h include/md_force.h
 	$(CC) $(OBJCFLAGS) -c -o $@ $<
 
 $(METAL_CL_HOST_OBJ): $(METAL_CL_HOST_SRC) include/md_types.h include/md_force.h include/md_celllist.h
+	$(CC) $(OBJCFLAGS) -c -o $@ $<
+
+$(ANE_HOST_OBJ): $(ANE_HOST_SRC) include/md_types.h include/md_force.h include/md_celllist.h
+	$(CC) $(OBJCFLAGS) -c -o $@ $<
+
+$(VIZ_OBJ): $(VIZ_SRC) include/md_types.h include/md_force.h
 	$(CC) $(OBJCFLAGS) -c -o $@ $<
 
 # SME2 file needs -march instead of -mcpu (streaming SVE mode)
@@ -107,4 +135,5 @@ bench: $(BIN)
 	@echo "=== Metal+CellList ===" && ./$(BIN) --metal-cl
 
 clean:
-	rm -f $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(METAL_AIR) $(METAL_LIB) $(BIN) trajectory.xyz
+	rm -f $(OBJ) $(METAL_HOST_OBJ) $(METAL_CL_HOST_OBJ) $(ANE_HOST_OBJ) $(VIZ_OBJ) \
+		$(METAL_AIR) $(METAL_LIB) $(BIN) $(VIZ_BIN) trajectory.xyz

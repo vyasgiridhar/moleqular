@@ -59,6 +59,9 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--metal-cl") == 0) {
             compute_forces = md_force_metal_cl;
             mode = "Metal+CellList";
+        } else if (strcmp(argv[i], "--ane") == 0) {
+            compute_forces = md_force_ane;
+            mode = "ANE (Neural Engine)";
         } else if (strncmp(argv[i], "--ncells=", 9) == 0) {
             ncells = atoi(argv[i] + 9);
         } else if (strncmp(argv[i], "--steps=", 8) == 0) {

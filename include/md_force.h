@@ -36,4 +36,7 @@ void md_force_omp_cl(MDSystem *sys, float *pe_out);
 /* Metal GPU + cell list — O(N) on GPU */
 void md_force_metal_cl(MDSystem *sys, float *pe_out);
 
+/* Apple Neural Engine — LJ force via CoreML MLP inference */
+void md_force_ane(MDSystem *sys, float *pe_out);
+
 #endif /* MD_FORCE_H */

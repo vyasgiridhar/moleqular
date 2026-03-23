@@ -5,3 +5,5 @@ trajectory.xyz
 *.profraw
 *.profdata
 .DS_Store
+ane_lj.mlpackage/
+moleqular-viz
