@@ -145,6 +145,8 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 | **Morton Z-order sort** (GPU cell list) | No improvement | Adjacent threads already in nearby cells from row-major sort. Morton improves 3D locality, but the L2 cache is big enough that row-major works fine at these sizes. |
 | **Padded uniform cells** (CELL_CAP=32) | Slower at small N | 3× more array slots than real particles (32 slots/cell × ~13 actual). Dispatch overhead dominates at small-medium N. |
 | **Horner polynomial in cell list kernel** | Worse energy conservation, no speed gain | Force (Horner) and PE (analytical) computed from different functions → non-conservative forces → systematic energy drift. Speed unchanged because cell list kernel is memory-bound, not compute-bound. |
+| **ANE neural force kernel** | System explodes after ~50 steps | 3×64 SiLU MLP on Apple Neural Engine. Initial PE matches to 0.01% but MLP approximation error accumulates through Verlet integration → catastrophic energy drift. Fun stunt, not viable for MD. |
+| **GCP Axion (Neoverse V2) cross-arch** | 2-2.8× slower than M4 per core | 128-bit SVE2 = same width as NEON, no wider-than-NEON benefit. 10.4 vs 29 GFLOPS single-core — mostly clock (2.0 vs 3.2 GHz) but M4's wider OoO engine adds another 30%. Cloud ARM is for scale-out, not single-core perf. |
 
 ### Key insight
 
