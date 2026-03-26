@@ -62,6 +62,15 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "--ane") == 0) {
             compute_forces = md_force_ane;
             mode = "ANE (Neural Engine)";
+        } else if (strcmp(argv[i], "--bvh") == 0) {
+            compute_forces = md_force_metal_bvh;
+            mode = "Metal+BVH";
+        } else if (strcmp(argv[i], "--nbnxm") == 0) {
+            compute_forces = md_force_metal_nbnxm;
+            mode = "Metal+NBNXM";
+        } else if (strcmp(argv[i], "--ane-direct") == 0) {
+            compute_forces = md_force_ane_direct;
+            mode = "ANE Direct";
         } else if (strncmp(argv[i], "--ncells=", 9) == 0) {
             ncells = atoi(argv[i] + 9);
         } else if (strncmp(argv[i], "--steps=", 8) == 0) {
@@ -133,7 +142,9 @@ int main(int argc, char **argv) {
      */
     int uses_n3l = (compute_forces == md_force_scalar || compute_forces == md_force_neon_n3l);
     int uses_cl  = (compute_forces == md_force_neon_cl || compute_forces == md_force_omp_cl
-                    || compute_forces == md_force_metal_cl);
+                    || compute_forces == md_force_metal_cl
+                    || compute_forces == md_force_metal_bvh
+                    || compute_forces == md_force_metal_nbnxm);
     double n = (double)sys->n_real;
     double pairs_per_eval;
     if (uses_cl) {

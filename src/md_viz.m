@@ -107,7 +107,7 @@ static void mat4_multiply(float *out, const float *a, const float *b);
     _sys = sys;
     _force_func = ff;
     _step = 0;
-    _steps_per_frame = 5;
+    _steps_per_frame = 10;
     _angle = 0.0f;
 
     /* Build render pipeline */
@@ -218,6 +218,16 @@ static void mat4_multiply(float *out, const float *a, const float *b);
 
     [cmd presentDrawable:view.currentDrawable];
     [cmd commit];
+
+    static int _fc = 0;
+    static double _ft0 = 0;
+    if (_fc == 0) { struct timespec _ts; clock_gettime(CLOCK_MONOTONIC, &_ts); _ft0 = _ts.tv_sec + _ts.tv_nsec*1e-9; }
+    if (++_fc % 60 == 0) {
+        struct timespec _ts; clock_gettime(CLOCK_MONOTONIC, &_ts);
+        double now = _ts.tv_sec + _ts.tv_nsec*1e-9;
+        fprintf(stderr, "[VIZ] %.1f fps (%.1f ms/frame)\n", 60.0/(now-_ft0), (now-_ft0)/60.0*1000.0);
+        _ft0 = now;
+    }
 }
 @end
 
@@ -251,7 +261,7 @@ static void mat4_multiply(float *out, const float *a, const float *b);
     MTKView *mtkView = [[MTKView alloc] initWithFrame:frame device:device];
     mtkView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
     mtkView.clearColor = MTLClearColorMake(0.05, 0.05, 0.08, 1.0);
-    mtkView.preferredFramesPerSecond = 60;
+    mtkView.preferredFramesPerSecond = 30;
 
     _renderer = [[MDVizRenderer alloc] initWithDevice:device
                                                  sys:_sys

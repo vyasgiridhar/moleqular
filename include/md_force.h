@@ -39,4 +39,13 @@ void md_force_metal_cl(MDSystem *sys, float *pe_out);
 /* Apple Neural Engine — LJ force via CoreML MLP inference */
 void md_force_ane(MDSystem *sys, float *pe_out);
 
+/* Metal GPU + BVH two-pass — neighbor list via tree traversal, then force compute */
+void md_force_metal_bvh(MDSystem *sys, float *pe_out);
+
+/* Metal GPU + NBNXM cluster pairs — GROMACS-style 8×8 cluster pair lists */
+void md_force_metal_nbnxm(MDSystem *sys, float *pe_out);
+
+/* Direct ANE — exact LJ force via private _ANEClient APIs, FP16, no CoreML */
+void md_force_ane_direct(MDSystem *sys, float *pe_out);
+
 #endif /* MD_FORCE_H */

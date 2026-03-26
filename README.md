@@ -2,7 +2,9 @@
 
 Molecular dynamics on Apple M4 — pushing every compute path to its limits.
 
-LJ (Lennard-Jones) N-body simulation with **11 force kernels** targeting different hardware units on Apple Silicon. Same physics, same particles, wildly different performance characteristics.
+LJ (Lennard-Jones) N-body simulation with **15 force kernels** targeting different hardware units on Apple Silicon. Same physics, same particles, wildly different performance characteristics.
+
+**Built in 2 days.** 15 kernels across 5 architectures (M4 NEON, Metal GPU, **M4 Neural Engine**, NVIDIA CUDA, GCP Axion SVE2). A real-time Metal particle renderer. A quantized BVH. A GROMACS-style NBNXM cluster pair kernel. A direct ANE kernel bypassing CoreML via reverse-engineered private APIs. Cross-compiled and benchmarked on cloud GPUs. The whole thing is an experiment in how fast you can explore a hardware design space when the iteration cycle collapses from days to minutes — write a kernel, benchmark it, understand why it's slow from the hardware architecture, pivot, repeat. Five GPU optimization strategies explored and empirically validated in a single sitting.
 
 ## Kernels
 
@@ -19,6 +21,9 @@ LJ (Lennard-Jones) N-body simulation with **11 force kernels** targeting differe
 | NEON+CL | `--cl` | CPU SIMD | NEON with cell list neighbor lists — O(N) scaling |
 | OMP+CL | `--omp-cl` | CPU multi-core | OpenMP+NEON with cell lists |
 | **Metal+CL** | `--metal-cl` | **M4 GPU** | Metal compute with cell lists — O(N) GPU |
+| **Metal+BVH** | `--bvh` | **M4 GPU** | Two-pass: quantized BVH traversal → neighbor list → force compute |
+| **Metal+NBNXM** | `--nbnxm` | **M4 GPU** | GROMACS-style 8×8 cluster pair lists — O(N) with SIMD coherence |
+| **ANE Direct** | `--ane-direct` | **M4 Neural Engine** | Exact LJ via private APIs — FP16 on ANE, NEON accumulation on CPU |
 
 ## Benchmark Results (Apple M4, MacBook Air, 16GB)
 
@@ -63,6 +68,7 @@ Each kernel exercises different M4 hardware:
 - **OpenMP** (~112 GFLOPS) — 4 P-cores saturated. E-cores hurt performance at small N due to smaller caches.
 - **Metal** (~810 GFLOPS) — 10 GPU cores on unified memory. Zero-copy buffers. Crosses over OMP at ~3K particles.
 - **Cell list kernels** — linked-list cell lists, gather neighbors into contiguous buffer, same NEON/GPU inner loop. Crossover vs all-pairs at ~2K particles.
+- **ANE Direct** (~15 GFLOPS) — first exact LJ force on Apple Neural Engine via reverse-engineered private APIs. FP16 LJ chain on ANE (15.8 TFLOPS chip), NEON distance matrix + accumulation on CPU. 0.1% of ANE peak — bottlenecked by CPU↔ANE data path, not compute.
 
 ## Build
 
@@ -120,6 +126,8 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 - GPU all-pairs bottleneck is the serial LJ dependency chain (10 cycles per pair), not parallelism. ~19% of theoretical peak is the expected efficiency for this workload.
 - Cell lists on GPU: O(N) scaling works great (45× at 70K) but per-pair GPU utilization drops from 19% to 3% due to scattered memory access (each thread reads different neighbor cells).
 - float32 precision is fine for MD — energy drift is dominated by integrator timestep, not FP rounding.
+- Apple Neural Engine: 15.8 TFLOPS FP16 is real, but only accessible for single-input computation graphs with high channel counts. The private `_ANEClient` API works — you can compile and run arbitrary MIL programs. But the compiler has bugs: `pow(x,-1)` returns wrong values, multi-input complex chains produce corrupted output, and FP16 output is hardcoded regardless of the MIL type declaration. IOSurface I/O is zero-copy on unified memory — no memcpy needed.
+- FP16 (half-precision) is viable for short MD runs — energy drift is ~24× worse than FP32 but the system stays stable over thousands of steps. The 10-bit mantissa gives ~0.1% force accuracy per pair.
 
 ## Experiment log — what I tried to optimize and what happened
 
@@ -134,6 +142,7 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 | **Cell lists** (CPU) | 340× speedup at 87K (NEON→OMP+CL) | O(N) vs O(N²). Only ~52 neighbors within cutoff at density 0.8 |
 | **Cell lists** (GPU) | 45× speedup at 70K | Same O(N) win; sorted particles give decent L2 behavior |
 | **CUDA on NVIDIA L4** (all-pairs tiled) | 6,821 GFLOPS peak (22% of 30.3 TFLOPS) | Same tiled algorithm, 58 SMs vs M4's 10 GPU cores. 8.4× faster than Metal — almost exactly the TFLOPS ratio (7.1×). Both ALU-bound on the same serial dependency chain. |
+| **NBNXM cluster pairs** (GPU) | 1.6× faster at small N, 1.2× at 62K | GROMACS-style 8×8 cluster pair lists. One threadgroup (64 threads) per i-cluster, all threads read same j-cluster → zero SIMD divergence. O(N) scaling from spatial decomposition. Wins at small N (many threadgroups → good occupancy) and large N (SIMD coherence dominates). Cell list still wins at medium N (4K-32K) where the 8× padding overhead outweighs coherence gains. |
 
 ### Misses
 
@@ -148,6 +157,8 @@ OMP_NUM_THREADS=4 ./moleqular --omp  # Pin to 4 P-cores
 | **Horner polynomial in cell list kernel** | Worse energy conservation, no speed gain | Force (Horner) and PE (analytical) computed from different functions → non-conservative forces → systematic energy drift. Speed unchanged because cell list kernel is memory-bound, not compute-bound. |
 | **ANE neural force kernel** | System explodes after ~50 steps | 3×64 SiLU MLP on Apple Neural Engine. Initial PE matches to 0.01% but MLP approximation error accumulates through Verlet integration → catastrophic energy drift. Fun stunt, not viable for MD. |
 | **GCP Axion (Neoverse V2) cross-arch** | 2-2.8× slower than M4 per core | 128-bit SVE2 = same width as NEON, no wider-than-NEON benefit. 10.4 vs 29 GFLOPS single-core — mostly clock (2.0 vs 3.2 GHz) but M4's wider OoO engine adds another 30%. Cloud ARM is for scale-out, not single-core perf. |
+| **BVH two-pass neighbor search** (GPU) | 2-3× slower than cell list | Quantized BVH built on CPU, stack-based tree traversal on GPU → neighbor list, then separate force kernel. Physics correct (PE matches all-pairs to 6 digits, energy drift 0.002% over 5K steps). But for **uniform LJ liquid**, cell list's O(1) 27-cell lookup beats BVH's O(log N) tree traversal. BVH wins on non-uniform distributions (Howard et al. 2019 showed 2-4× over cell lists) — our FCC lattice is the worst case: every cell equally populated, no void regions to prune. Tree traversal also hammers GPU with scattered memory reads + per-thread stack in registers → low occupancy. |
+| **Direct ANE hybrid** (CPU+ANE) | 15 GFLOPS, correct physics, PE matches Metal to 0.04% | Bypassed CoreML entirely via maderix's reverse-engineered `_ANEClient`/`_ANECompiler` APIs. Hand-wrote MIL programs. ANE runs the FP16 LJ chain (real_div, mul, sigmoid — 15 chained ops on [1,N,1,N]). CPU NEON handles distance matrix + force accumulation. Zero-copy IOSurface I/O on unified memory. **Three bugs discovered in ANE private APIs**: (1) `pow(x, -1)` is broken — returns wrong values, must use `real_div(1, x)`. (2) Multi-input complex chains corrupt computation — the ANE compiler produces wrong results when a 10+ op chain mixes data from two inputs. Simple multi-input ops (add, mul) work fine; complex chains don't. Workaround: single-input kernels only. (3) ANE always outputs FP16 regardless of MIL output type declaration — `cast(dtype="fp32")` is ignored. Energy drift 24× worse than FP32 Metal (0.024% vs 0.001% over 1K steps) but stable. First correct multi-step MD simulation on Apple Neural Engine. |
 
 ### Cross-architecture GPU comparison (all-pairs tiled, ms/step)
 
@@ -166,7 +177,41 @@ L4 peak: 6,821 GFLOPS (22% utilization). M4 peak: 810 GFLOPS (19%). Both hit the
 
 ### Key insight
 
-The all-pairs tiled Metal kernel gets 810 GFLOPS because all threads in a threadgroup read the **same** j-particles from shared memory — perfect SIMD coherence. Cell lists break this: each thread reads **different** j-particles from different cells. This is a fundamental tension between algorithmic efficiency (O(N)) and GPU execution efficiency (coherent SIMD). Production MD codes (GROMACS, LAMMPS) resolve this with cluster-pair neighbor lists — a research-grade data structure, not a quick optimization.
+The all-pairs tiled Metal kernel gets 810 GFLOPS because all threads in a threadgroup read the **same** j-particles from shared memory — perfect SIMD coherence. Cell lists break this: each thread reads **different** j-particles from different cells. This is a fundamental tension between algorithmic efficiency (O(N)) and GPU execution efficiency (coherent SIMD). Production MD codes (GROMACS, LAMMPS) resolve this with cluster-pair neighbor lists — grouping 8 atoms into clusters so every thread in a SIMD group processes the same j-data.
+
+We implemented NBNXM-style cluster pairs and confirmed: it works. SIMD coherence restored, O(N) scaling preserved. But for uniform LJ liquid the 8× padding overhead (8 atoms/cluster × ~54 j-clusters = 432 pairs vs ~52 actual neighbors) partially negates the coherence win. The crossover favors NBNXM at large N (62K+) where GPU saturation matters most. For non-uniform systems (proteins, colloids, multiphase), cluster pairs would dominate at all sizes.
+
+### ANE Direct scaling (ms/step)
+
+```
+N        ANE Direct   Metal AP    ANE/Metal
+864      0.89         0.53        1.7×
+2,048    5.77         0.82        7.0×
+4,000    21.2         2.25        9.4×
+6,912    66.6         4.72        14.1×
+```
+
+ANE peaks at ~15 GFLOPS across all N (flat scaling). The ANE's 15.8 TFLOPS FP16 isn't the bottleneck — time breakdown at N=6912:
+
+```
+Phase            Time     Share
+CPU distance     18 ms    28%    ← O(N²) NEON, single-core
+ANE eval         33 ms    53%    ← FP16 LJ chain (reading/writing N×N from SRAM)
+CPU accumulate   11 ms    18%    ← FP16→F32 convert + fm*dr + reduce (NEON)
+```
+
+The ANE compute itself sustains ~28 GFLOPS on the LJ chain — the rest is CPU-bound O(N²) work that can't run on ANE due to the multi-input compiler bug.
+
+### NBNXM cluster pair scaling (ms/step)
+
+```
+N        Metal+CL    Metal+NBNXM    Winner
+864      0.59        0.38           NBNXM 1.6×
+4,000    0.70        0.75           ~tie
+10,976   1.07        1.39           CL 1.3×
+32,000   2.25        3.28           CL 1.5×
+62,500   3.89        3.33           NBNXM 1.2×
+```
 
 ## License
 

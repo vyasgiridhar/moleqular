@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>moleqular — Kernel Benchmarks</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#08080c; color:#ccc; font-family:'SF Mono','Fira Code',monospace; display:flex; justify-content:center; padding:48px 20px; }
+  .page { max-width:740px; width:100%; }
+  h1 { font-size:18px; color:#fff; }
+  .sub { font-size:11px; color:#444; margin:4px 0 36px; }
+  .panel { margin-bottom:40px; }
+  .panel-head { font-size:13px; color:#666; margin-bottom:14px; display:flex; justify-content:space-between; align-items:baseline; }
+  .panel-head span { font-size:10px; color:#333; }
+  .row { display:flex; align-items:center; margin-bottom:5px; }
+  .label { width:120px; font-size:11px; color:#888; text-align:right; padding-right:10px; flex-shrink:0; white-space:nowrap; }
+  .track { flex:1; position:relative; height:20px; }
+  .bar { height:100%; border-radius:2px; position:relative; min-width:1px; }
+  .val { position:absolute; right:-52px; top:3px; font-size:10px; color:#555; width:48px; }
+  .bar.cpu      { background:#3a7; }
+  .bar.omp      { background:#29b; }
+  .bar.gpu      { background:#d72; }
+  .bar.ane      { background:#a3e; }
+  .fastest .label { color:#fff; }
+  .fastest .val { color:#999; }
+  .legend { display:flex; gap:20px; margin-bottom:32px; font-size:10px; color:#555; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .divider { border:none; border-top:1px solid #151518; margin:36px 0; }
+  .breakdown { margin-top:32px; }
+  .breakdown h3 { font-size:12px; color:#555; margin-bottom:10px; }
+  .bbar { display:flex; height:24px; border-radius:3px; overflow:hidden; margin-bottom:6px; }
+  .bbar div { display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:600; }
+  .note { font-size:10px; color:#333; line-height:1.6; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>moleqular</h1>
+<p class="sub">15 LJ force kernels · Apple M4 MacBook Air 16 GB · ms/step, lower is faster</p>
+
+<div class="legend">
+  <span><i style="background:#3a7"></i>CPU single-core</span>
+  <span><i style="background:#29b"></i>CPU 4 P-cores</span>
+  <span><i style="background:#d72"></i>Metal GPU</span>
+  <span><i style="background:#a3e"></i>Neural Engine</span>
+</div>
+
+<div class="panel" id="p1"></div>
+<hr class="divider">
+<div class="panel" id="p2"></div>
+
+<div class="breakdown">
+  <h3>ANE Direct — where the time goes (N=6,912)</h3>
+  <div class="bbar">
+    <div style="width:28%;background:#3a7;color:#08080c;">distmat 28%</div>
+    <div style="width:53%;background:#a3e;color:#08080c;">ANE LJ chain 53%</div>
+    <div style="width:18%;background:#29b;color:#08080c;">accum 18%</div>
+  </div>
+  <p class="note">
+    15.8 TFLOPS on-chip, 15 GFLOPS out the door. CPU-bound on O(N²) distance matrix.<br>
+    ANE compiler bug forces single-input kernels — cross-input chains produce corrupt output.<br>
+    Zero-copy IOSurface on unified memory. FP16 LJ chain correct to 0.04% vs Metal FP32.
+  </p>
+</div>
+
+<script>
+function panel(id, title, subtitle, rows, maxMs) {
+  const el = document.getElementById(id);
+  let h = `<div class="panel-head">${title}<span>${subtitle}</span></div>`;
+  rows.sort((a,b) => a.ms - b.ms);
+  const fastest = rows[0].ms;
+  rows.forEach((r,i) => {
+    const pct = (r.ms / maxMs * 100).toFixed(1);
+    const cls = i === 0 ? 'row fastest' : 'row';
+    h += `<div class="${cls}">
+      <div class="label">${r.name}</div>
+      <div class="track">
+        <div class="bar ${r.hw}" style="width:${pct}%"></div>
+        <div class="val">${r.ms < 1 ? r.ms.toFixed(3) : r.ms.toFixed(2)}</div>
+      </div>
+    </div>`;
+  });
+  el.innerHTML = h;
+}
+
+panel('p1', 'N = 864', '4×6³ particles · all-pairs regime', [
+  {name:'Scalar',       ms:0.663, hw:'cpu'},
+  {name:'NEON',         ms:0.503, hw:'cpu'},
+  {name:'NEON+N3L',     ms:0.320, hw:'cpu'},
+  {name:'NEON+CL',      ms:0.574, hw:'cpu'},
+  {name:'OMP+NEON 4P',  ms:0.163, hw:'omp'},
+  {name:'OMP+CL',       ms:0.195, hw:'omp'},
+  {name:'Metal',        ms:0.711, hw:'gpu'},
+  {name:'Metal+CL',     ms:0.488, hw:'gpu'},
+  {name:'Metal+BVH',    ms:0.514, hw:'gpu'},
+  {name:'Metal+NBNXM',  ms:0.285, hw:'gpu'},
+  {name:'ANE Direct',   ms:0.884, hw:'ane'},
+], 1.0);
+
+panel('p2', 'N = 6,912', '4×12³ particles · GPU scaling regime', [
+  {name:'OMP+NEON 4P',  ms:8.664, hw:'omp'},
+  {name:'OMP+CL',       ms:1.511, hw:'omp'},
+  {name:'Metal',        ms:3.726, hw:'gpu'},
+  {name:'Metal+CL',     ms:0.671, hw:'gpu'},
+  {name:'Metal+NBNXM',  ms:0.675, hw:'gpu'},
+  {name:'ANE Direct',   ms:72.22, hw:'ane'},
+], 75);
+</script>
+
+</div>
+</body>
+</html>
